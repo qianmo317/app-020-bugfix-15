@@ -25,6 +25,7 @@ import {
   resetRules,
   setMark,
   setLastValidation,
+  moveFloorToBuilding,
 } from '../src/store/store';
 import type { AppState } from '../src/store/store';
 import type { Pt } from '../src/model';
@@ -123,14 +124,58 @@ describe('设施：编号、exits 同步、拖动、检查记录', () => {
     const x1 = addFacility(fid, 'extinguisher', 20000, 1000);
     let f = snap().floors[fid];
     expect(f.exits).toEqual([e1, e2]);
-    expect(f.facilities.find((x) => x.id === e1)!.code).toBe('1F-EXIT-01');
-    expect(f.facilities.find((x) => x.id === e2)!.code).toBe('1F-EXIT-02');
-    expect(f.facilities.find((x) => x.id === x1)!.code).toBe('1F-EX-01');
+    expect(f.facilities.find((x) => x.id === e1)!.code).toBe('A-1F-EXIT-01');
+    expect(f.facilities.find((x) => x.id === e2)!.code).toBe('A-1F-EXIT-02');
+    expect(f.facilities.find((x) => x.id === x1)!.code).toBe('A-1F-EX-01');
     expect(f.facilities.find((x) => x.id === x1)!.spec).toEqual({ extType: 'dry_powder', weightKg: 4 });
     deleteFacility(fid, e1);
     f = snap().floors[fid];
     expect(f.exits).toEqual([e2]);
     expect(f.facilities.find((x) => x.id === e1)).toBeUndefined();
+  });
+
+  it('S6b 删除中间一台灭火器再补：新编号取最大序号 +1，不与剩余设施撞号', () => {
+    const a = addFacility(fid, 'extinguisher', 1000, 1000); // A-1F-EX-01
+    const b = addFacility(fid, 'extinguisher', 2000, 1000); // A-1F-EX-02
+    const c = addFacility(fid, 'extinguisher', 3000, 1000); // A-1F-EX-03
+    deleteFacility(fid, b); // 删掉中间的 02
+    const d = addFacility(fid, 'extinguisher', 4000, 1000);
+    const codes = snap().floors[fid].facilities.filter((x) => x.kind === 'extinguisher').map((x) => x.code);
+    expect(codes).toEqual(['A-1F-EX-01', 'A-1F-EX-03', 'A-1F-EX-04']);
+    expect(new Set(codes).size).toBe(codes.length); // 图上两台不会一个号
+    expect(snap().floors[fid].facilities.find((x) => x.id === d)!.code).toBe('A-1F-EX-04');
+    expect(a).not.toBe(c);
+  });
+
+  it('S6c 不同楼栋同层号：编号前缀各自独立，不会编到一块儿', () => {
+    const bid2 = addBuilding('二号楼', 'retail');
+    const fid2 = addFloor(bid2, 1);
+    addFacility(fid, 'extinguisher', 1000, 1000);
+    addFacility(fid2, 'extinguisher', 1000, 1000);
+    expect(snap().floors[fid].facilities[0].code).toBe('A-1F-EX-01');
+    expect(snap().floors[fid2].facilities[0].code).toBe('B-1F-EX-01');
+  });
+
+  it('S6d 楼层转到另一栋楼：编号前缀整体更换（A-* → B-*）', () => {
+    addFacility(fid, 'extinguisher', 1000, 1000);
+    addFacility(fid, 'hydrant', 2000, 1000);
+    const bid2 = addBuilding('二号楼', 'retail');
+    moveFloorToBuilding(fid, bid2);
+    const f = snap().floors[fid];
+    expect(f.buildingId).toBe(bid2);
+    expect(f.facilities.map((x) => x.code).sort()).toEqual(['B-1F-EX-01', 'B-1F-HY-01']);
+    // 原楼栋不再持有该层
+    expect(snap().buildings.find((x) => x.id === bid)!.floors).not.toContain(fid);
+    expect(snap().buildings.find((x) => x.id === bid2)!.floors).toContain(fid);
+  });
+
+  it('S6e 删除楼栋后字母序号顺延，剩余楼栋设施编号跟随重排', () => {
+    const bid2 = addBuilding('二号楼', 'retail');
+    const fid2 = addFloor(bid2, 1);
+    addFacility(fid2, 'extinguisher', 1000, 1000); // B-1F-EX-01
+    deleteBuilding(bid); // 删掉 A 栋，原 B 栋顺延为 A 栋
+    const f = snap().floors[fid2];
+    expect(f.facilities[0].code).toBe('A-1F-EX-01');
   });
 
   it('S7 moveFacility 更新坐标并替换楼层引用（灭火器拖动路径）', () => {

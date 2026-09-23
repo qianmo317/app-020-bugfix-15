@@ -1,14 +1,12 @@
 import { useMemo, useState } from 'react';
 import type { FacilityKind } from '../model';
 import { FACILITY_LABELS, USAGE_LABELS } from '../model';
-import { checkDueInfo } from '../lib/engine';
+import { buildLedger } from '../lib/ledger';
 import { useStore } from '../store/store';
-import { floorLabel } from '../store/id';
 import { Link } from '../router';
-import { pointInPoly } from '../lib/geometry';
 
 function download(name: string, content: string, mime = 'text/csv') {
-  const blob = new Blob([`\ufeff${content}`], { type: `${mime};charset=utf-8` });
+  const blob = new Blob([`﻿${content}`], { type: `${mime};charset=utf-8` });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = name;
@@ -23,60 +21,10 @@ export function FacilitiesPage() {
   const [onlyOverdue, setOnlyOverdue] = useState(false);
   const now = Date.now();
 
-  const rows = useMemo(() => {
-    const out: {
-      buildingName: string;
-      floorId: string;
-      floorLabel: string;
-      roomId?: string;
-      roomName: string;
-      id: string;
-      code: string;
-      kind: FacilityKind;
-      x: number;
-      y: number;
-      lastDate: string | null;
-      lastStatus: string | null;
-      dueDate: string | null;
-      overdue: boolean;
-      missing: boolean;
-      defect: boolean;
-    }[] = [];
-    for (const b of buildings) {
-      for (const fid of b.floors) {
-        const f = floors[fid];
-        if (!f) continue;
-        for (const fac of f.facilities) {
-          if (kindFilter !== 'all' && fac.kind === kindFilter) continue;
-          const room = f.rooms.find((r) => pointInPoly({ x: fac.x, y: fac.y }, r.polygon));
-          const info = checkDueInfo(fac, now);
-          if (onlyOverdue && !(info.overdue || info.missing || info.defect)) continue;
-          const sorted = [...fac.checks].sort((a, b2) => b2.date.localeCompare(a.date));
-          out.push({
-            buildingName: b.name,
-            floorId: f.id,
-            floorLabel: floorLabel(f.level),
-            roomId: room?.id,
-            roomName: room?.name ?? '—',
-            id: fac.id,
-            code: fac.code,
-            kind: fac.kind,
-            x: fac.x,
-            y: fac.y,
-            lastDate: sorted[0]?.date ?? null,
-            lastStatus: sorted[0]?.status ?? null,
-            dueDate: info.dueDate,
-            overdue: info.overdue,
-            missing: info.missing,
-            defect: info.defect,
-          });
-        }
-      }
-    }
-    // 按下次应检日期排序（过期/无记录排最前）
-    out.sort((a, b2) => (a.dueDate ?? '0').localeCompare(b2.dueDate ?? '0'));
-    return out;
-  }, [buildings, floors, kindFilter, onlyOverdue, now]);
+  const rows = useMemo(
+    () => buildLedger(buildings, floors, { kind: kindFilter, onlyOverdue, now }),
+    [buildings, floors, kindFilter, onlyOverdue, now],
+  );
 
   const exportCsv = () => {
     const header = '建筑,楼层,点位编号,类型,所在房间,最近检查,状态,下次应检,是否过期';
@@ -119,7 +67,7 @@ export function FacilitiesPage() {
         </thead>
         <tbody>
           {rows.map((r) => (
-            <tr key={r.id} className={r.overdue || r.missing || r.defect ? 'overdue-row' : ''}>
+            <tr key={r.facilityId} className={r.overdue || r.missing || r.defect ? 'overdue-row' : ''}>
               <td>{r.buildingName}</td>
               <td>{r.floorLabel}</td>
               <td>{r.code}</td>
@@ -129,7 +77,8 @@ export function FacilitiesPage() {
               <td>{r.lastStatus ? <span className={`badge st-${r.lastStatus}`}>{r.lastStatus}</span> : '—'}</td>
               <td>{r.dueDate ?? '—'}{(r.overdue || r.missing || r.defect) && <span className="badge st-expired">待整改</span>}</td>
               <td>
-                <Link className="btn" to={`/floor/${r.floorId}`}>查看</Link>
+                {/* 带上设施 id：进入楼层后直接选中并居中，定位不到的情况不再可能出现 */}
+                <Link className="btn" to={`/floor/${r.floorId}?fac=${r.facilityId}`}>查看</Link>
               </td>
             </tr>
           ))}

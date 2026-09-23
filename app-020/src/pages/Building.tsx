@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { BuildingKind } from '../model';
-import { addFloor, deleteFloor, updateBuilding, useStore } from '../store/store';
+import { addFloor, deleteFloor, moveFloorToBuilding, updateBuilding, useStore } from '../store/store';
 import { floorLabel } from '../store/id';
 import { Link } from '../router';
 
@@ -13,6 +13,7 @@ const KIND_LABELS: Record<BuildingKind, string> = {
 
 export function BuildingPage({ buildingId }: { buildingId: string }) {
   const building = useStore((s) => s.buildings.find((b) => b.id === buildingId));
+  const buildings = useStore((s) => s.buildings);
   const floors = useStore((s) => s.floors);
   const [level, setLevel] = useState(1);
 
@@ -92,6 +93,23 @@ export function BuildingPage({ buildingId }: { buildingId: string }) {
                 <td>
                   <Link className="btn" to={`/floor/${f.id}`}>编辑</Link>{' '}
                   <Link className="btn" to={`/floor/${f.id}/print`}>出图</Link>{' '}
+                  {buildings.length > 1 && (
+                    <select
+                      className="move-select"
+                      value=""
+                      title="把整层移到另一栋楼（编号前缀自动更换）"
+                      onChange={(e) => {
+                        if (e.target.value && confirm(`把 ${floorLabel(f.level)} 移到另一栋楼？层内设施编号前缀将自动更换`)) {
+                          moveFloorToBuilding(f.id, e.target.value);
+                        }
+                      }}
+                    >
+                      <option value="">转到楼栋…</option>
+                      {buildings.filter((x) => x.id !== building.id).map((x) => (
+                        <option key={x.id} value={x.id}>{x.name}</option>
+                      ))}
+                    </select>
+                  )}{' '}
                   <button
                     className="danger"
                     onClick={() => confirm(`删除 ${floorLabel(f.level)}？`) && deleteFloor(f.id)}

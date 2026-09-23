@@ -19,9 +19,9 @@ const snap = (v: number) => Math.round(v / SNAP) * SNAP;
 const ROOM_USAGES: RoomUsage[] = ['office', 'retail', 'storage', 'ward', 'other'];
 const FAC_KINDS = ['extinguisher', 'hydrant', 'exit_sign', 'emergency_light', 'exit', 'sprinkler'] as const;
 
-type Props = { floorId: string };
+type Props = { floorId: string; focusFacilityId?: string | null };
 
-export function FloorEditor({ floorId }: Props) {
+export function FloorEditor({ floorId, focusFacilityId }: Props) {
   const floor = useStore((s) => s.floors[floorId]);
   const building = useStore((s) => s.buildings.find((b) => b.id === floor?.buildingId));
   const rules = useStore((s) => (floor ? s.rules[s.buildings.find((b) => b.id === floor.buildingId)?.kind ?? 'office'] : undefined));
@@ -61,6 +61,22 @@ export function FloorEditor({ floorId }: Props) {
       if (url) URL.revokeObjectURL(url);
     };
   }, [floor?.underlay?.key]);
+
+  // 台账「查看」深链：?fac=设施id → 自动选中并居中高亮（台账逐条能定位到图上设施）
+  const floorRef = useRef(floor);
+  floorRef.current = floor;
+  useEffect(() => {
+    if (!focusFacilityId) return;
+    const f = floorRef.current;
+    const fac = f?.facilities.find((x) => x.id === focusFacilityId);
+    if (fac) {
+      setSelected({ type: 'facility', id: fac.id });
+      setView((v) => ({ ...v, cx: fac.x, cy: fac.y }));
+      setHighlight({ x: fac.x, y: fac.y });
+      const t = setTimeout(() => setHighlight(null), 2500);
+      return () => clearTimeout(t);
+    }
+  }, [floorId, focusFacilityId]);
 
   // 初始视野：按楼层范围适配
   useEffect(() => {

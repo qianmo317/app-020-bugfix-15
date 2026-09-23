@@ -7,14 +7,15 @@ import { RulesPage } from './pages/Rules';
 import { Link, useRoute } from './router';
 
 export function App() {
-  const { parts } = useRoute();
+  const { parts, query } = useRoute();
   const [seg0, seg1, seg2] = parts;
+  const focusFacility = query.get('fac');
 
   let content: React.ReactNode;
   if (!seg0) content = <Home />;
   else if (seg0 === 'building' && seg1) content = <BuildingPage buildingId={seg1} />;
   else if (seg0 === 'floor' && seg1 && seg2 === 'print') content = <PrintPage floorId={seg1} />;
-  else if (seg0 === 'floor' && seg1) content = <FloorEditor floorId={seg1} />;
+  else if (seg0 === 'floor' && seg1) content = <FloorEditor floorId={seg1} focusFacilityId={focusFacility} />;
   else if (seg0 === 'facilities') content = <FacilitiesPage />;
   else if (seg0 === 'rules') content = <RulesPage />;
   else content = <div className="page">页面不存在。<Link to="/">返回首页</Link></div>;

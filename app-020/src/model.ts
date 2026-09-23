@@ -34,7 +34,7 @@ export type Facility = {
   kind: FacilityKind;
   x: number; // mm
   y: number; // mm
-  code: string; // 楼层-类型-序号，如 3F-EX-01
+  code: string; // 楼栋-楼层-类型-序号，如 A-3F-EX-01；同楼栋同楼层同类型唯一
   spec?: {
     extType?: 'dry_powder' | 'co2' | 'water';
     weightKg?: number;

@@ -13,7 +13,7 @@ import type {
   ValidationResult,
 } from '../model';
 import { DEFAULT_RULES } from '../rules/defaults';
-import { nextCode, uid } from './id';
+import { buildingCode, codesHealthy, nextCode, renumberFloor, uid } from './id';
 import { polyAreaM2 } from '../lib/geometry';
 
 const STORAGE_KEY = 'fem.v1';
@@ -26,6 +26,23 @@ export type AppState = {
   marks: Record<string, Pt>;
 };
 
+/** 楼栋码 = 建筑在列表中的字母序号（A、B、C…） */
+function bcodeOf(s: AppState, buildingId: string): string {
+  const i = s.buildings.findIndex((b) => b.id === buildingId);
+  return buildingCode(Math.max(0, i));
+}
+
+/** 旧版本数据迁移：编号统一为「楼栋码-层号-类型码-序号」，修复撞号/前缀不符 */
+function migrateCodes(s: AppState) {
+  s.buildings.forEach((b, i) => {
+    const code = buildingCode(i);
+    for (const fid of b.floors) {
+      const f = s.floors[fid];
+      if (f && !codesHealthy(f, code)) s.floors[fid] = renumberFloor(f, code);
+    }
+  });
+}
+
 function loadState(): AppState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -33,12 +50,14 @@ function loadState(): AppState {
       const s = JSON.parse(raw) as Partial<AppState>;
       // 缺失的节用默认值补齐（如旧版本数据没有 rules/marks），而不是整体丢弃用户数据
       if (s && Array.isArray(s.buildings) && s.floors) {
-        return {
+        const loaded: AppState = {
           buildings: s.buildings,
           floors: s.floors,
           rules: { ...structuredClone(DEFAULT_RULES), ...(s.rules ?? {}) },
           marks: s.marks ?? {},
         };
+        migrateCodes(loaded);
+        return loaded;
       }
     }
   } catch {
@@ -120,10 +139,19 @@ export function updateBuilding(id: string, patch: Partial<Pick<Building, 'name' 
 
 export function deleteBuilding(id: string) {
   setState((s) => {
-    const b = s.buildings.find((x) => x.id === id);
+    const idx = s.buildings.findIndex((x) => x.id === id);
+    const b = s.buildings[idx];
     if (!b) return;
     for (const fid of b.floors) delete s.floors[fid];
     s.buildings = s.buildings.filter((x) => x.id !== id);
+    // 删除后字母序号顺延：被删楼栋之后的建筑全部重新编号
+    for (let i = idx; i < s.buildings.length; i++) {
+      const code = buildingCode(i);
+      for (const fid of s.buildings[i].floors) {
+        const f = s.floors[fid];
+        if (f) s.floors[fid] = renumberFloor(f, code);
+      }
+    }
   });
 }
 
@@ -159,6 +187,25 @@ export function deleteFloor(floorId: string) {
     }
     delete s.floors[floorId];
     delete s.marks[floorId];
+  });
+}
+
+/**
+ * 把整层移到另一栋楼（或同栋内调整）：楼层归属变更后，设施编号前缀
+ * 必须跟着换成目标楼栋码，否则两栋楼的设施会编到同一段号里。
+ */
+export function moveFloorToBuilding(floorId: string, targetBuildingId: string) {
+  setState((s) => {
+    const f = s.floors[floorId];
+    if (!f || f.buildingId === targetBuildingId) return;
+    const src = s.buildings.find((x) => x.id === f.buildingId);
+    const dst = s.buildings.find((x) => x.id === targetBuildingId);
+    if (!src || !dst) return;
+    src.floors = src.floors.filter((x) => x !== floorId);
+    dst.floors = [...dst.floors, floorId];
+    f.buildingId = targetBuildingId;
+    f.version++;
+    s.floors[floorId] = renumberFloor({ ...f }, bcodeOf(s, targetBuildingId));
   });
 }
 
@@ -205,7 +252,7 @@ export function moveRoom(floorId: string, roomId: string, dx: number, dy: number
 export function addFacility(floorId: string, kind: FacilityKind, x: number, y: number): string {
   const id = uid();
   updateFloor(floorId, (f) => {
-    const fac: Facility = { id, kind, x, y, code: nextCode(f, kind), checks: [] };
+    const fac: Facility = { id, kind, x, y, code: nextCode(f, kind, bcodeOf(state, f.buildingId)), checks: [] };
     if (kind === 'extinguisher') fac.spec = { extType: 'dry_powder', weightKg: 4 };
     f.version++;
     f.facilities.push(fac);
@@ -340,15 +387,15 @@ export function loadDemo(): string {
     const mkF = (kind: FacilityKind, x: number, y: number, code: string, checks: Facility['checks'] = [], spec?: Facility['spec']) => {
       facilities.push({ id: uid(), kind, x: x * M, y: y * M, code, checks, spec });
     };
-    mkF('exit', 0.5, 1, '1F-EXIT-01');
-    mkF('exit', 40.5, 1, '1F-EXIT-02');
-    mkF('extinguisher', 20.5, 1, '1F-EX-01', [{ date: dateStr(20), status: 'ok' }], { extType: 'dry_powder', weightKg: 4 });
-    mkF('extinguisher', 4, 5, '1F-EX-02', [{ date: dateStr(45), status: 'ok' }], { extType: 'dry_powder', weightKg: 4 });
-    mkF('extinguisher', 36, 5, '1F-EX-03', [], { extType: 'co2', weightKg: 2 });
-    mkF('hydrant', 10, 1, '1F-HY-01', [{ date: dateStr(10), status: 'ok' }]);
-    mkF('exit_sign', 1, 1.7, '1F-ES-01', [{ date: dateStr(15), status: 'ok' }]);
-    mkF('exit_sign', 40, 1.7, '1F-ES-02', [{ date: dateStr(15), status: 'ok' }]);
-    mkF('emergency_light', 20.5, 0.4, '1F-EL-01', [{ date: dateStr(15), status: 'ok' }]);
+    mkF('exit', 0.5, 1, 'A-1F-EXIT-01');
+    mkF('exit', 40.5, 1, 'A-1F-EXIT-02');
+    mkF('extinguisher', 20.5, 1, 'A-1F-EX-01', [{ date: dateStr(20), status: 'ok' }], { extType: 'dry_powder', weightKg: 4 });
+    mkF('extinguisher', 4, 5, 'A-1F-EX-02', [{ date: dateStr(45), status: 'ok' }], { extType: 'dry_powder', weightKg: 4 });
+    mkF('extinguisher', 36, 5, 'A-1F-EX-03', [], { extType: 'co2', weightKg: 2 });
+    mkF('hydrant', 10, 1, 'A-1F-HY-01', [{ date: dateStr(10), status: 'ok' }]);
+    mkF('exit_sign', 1, 1.7, 'A-1F-ES-01', [{ date: dateStr(15), status: 'ok' }]);
+    mkF('exit_sign', 40, 1.7, 'A-1F-ES-02', [{ date: dateStr(15), status: 'ok' }]);
+    mkF('emergency_light', 20.5, 0.4, 'A-1F-EL-01', [{ date: dateStr(15), status: 'ok' }]);
     const exits = facilities.filter((f) => f.kind === 'exit').map((f) => f.id);
     s.floors[floorId] = {
       id: floorId,
