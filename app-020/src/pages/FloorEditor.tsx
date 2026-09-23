@@ -11,7 +11,7 @@ import { FloorPlan, mmFromEvent, wheelZoom, type DragState, type Selection, type
 import { FacilityGlyph, USAGE_FILLS } from '../components/symbols';
 
 import { ValidationPanel } from '../components/ValidationPanel';
-import { Link } from '../router';
+import { Link, useRoute } from '../router';
 
 const SNAP = 100; // 绘制/拖动吸附 0.1m
 const snap = (v: number) => Math.round(v / SNAP) * SNAP;
@@ -22,6 +22,8 @@ const FAC_KINDS = ['extinguisher', 'hydrant', 'exit_sign', 'emergency_light', 'e
 type Props = { floorId: string };
 
 export function FloorEditor({ floorId }: Props) {
+  const { query } = useRoute();
+  const facParam = query.get('fac');
   const floor = useStore((s) => s.floors[floorId]);
   const building = useStore((s) => s.buildings.find((b) => b.id === floor?.buildingId));
   const rules = useStore((s) => (floor ? s.rules[s.buildings.find((b) => b.id === floor.buildingId)?.kind ?? 'office'] : undefined));
@@ -62,9 +64,10 @@ export function FloorEditor({ floorId }: Props) {
     };
   }, [floor?.underlay?.key]);
 
-  // 初始视野：按楼层范围适配
+  // 初始视野：按楼层范围适配（台账深链 ?fac= 时让位于定位效果）
   useEffect(() => {
     if (!floor) return;
+    if (facParam) return;
     const polys = floor.rooms.map((r) => r.polygon);
     if (!polys.length) return;
     const bb = bboxOf(polys);
@@ -80,6 +83,20 @@ export function FloorEditor({ floorId }: Props) {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [floorId, floor?.rooms.length === 0]);
+
+  // 台账「查看」深链：#/floor/:id?fac=设施id → 居中、高亮并选中该设施，保证台账每条都能定位到图上实物
+  useEffect(() => {
+    if (!floor || !facParam) return;
+    const fac = floor.facilities.find((x) => x.id === facParam);
+    if (!fac) return;
+    setView((v) => ({ ...v, cx: fac.x, cy: fac.y, zoom: Math.max(v.zoom, 0.12) }));
+    setSelected({ type: 'facility', id: fac.id });
+    setHighlight({ x: fac.x, y: fac.y });
+    const t = setTimeout(() => setHighlight(null), 3000);
+    return () => clearTimeout(t);
+    // 仅在进入楼层（或切换 fac 参数）时执行一次；拖动设施不应反复抢视野
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [floorId, facParam]);
 
   // 自动校验（防抖）
   useEffect(() => {

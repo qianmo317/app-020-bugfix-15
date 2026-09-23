@@ -10,6 +10,7 @@ const TYPE_LABELS: Record<string, string> = {
   CHECK_OVERDUE: '检查过期',
   CHECK_MISSING: '缺检查记录',
   FACILITY_DEFECT: '设施缺陷',
+  FACILITY_CODE_DUPLICATE: '设施编号重复',
   NO_DOOR: '房间无门',
 };
 

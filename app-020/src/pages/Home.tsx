@@ -14,13 +14,32 @@ export function Home() {
   const buildings = useStore((s) => s.buildings);
   const floors = useStore((s) => s.floors);
   const [name, setName] = useState('');
+  const [code, setCode] = useState('');
   const [kind, setKind] = useState<BuildingKind>('office');
+
+  /** 建议下一个楼栋编号：已用 A..Z 中首个空缺（也兼容手工改过的编号） */
+  const suggestCode = () => {
+    const used = new Set(buildings.map((b) => b.code).filter(Boolean));
+    for (let i = 0; i < 26; i++) {
+      const c = String.fromCharCode(65 + i);
+      if (!used.has(c)) return c;
+    }
+    return '';
+  };
 
   return (
     <div className="page">
       <h2>建筑与楼层</h2>
       <div className="toolbar">
         <input placeholder="建筑名称" value={name} onChange={(e) => setName(e.target.value)} />
+        <input
+          placeholder="楼栋编号（如 A）"
+          value={code}
+          maxLength={8}
+          style={{ width: 130 }}
+          onChange={(e) => setCode(e.target.value.toUpperCase())}
+          title="楼栋编号作为设施编号前缀（A-3F-EX-01），不同楼栋必须不同；留空则设施编号只带楼层段"
+        />
         <select value={kind} onChange={(e) => setKind(e.target.value as BuildingKind)}>
           {Object.entries(KIND_LABELS).map(([k, v]) => (
             <option key={k} value={k}>{v}</option>
@@ -29,8 +48,9 @@ export function Home() {
         <button
           disabled={!name.trim()}
           onClick={() => {
-            addBuilding(name.trim(), kind);
+            addBuilding(name.trim(), kind, code.trim() || suggestCode());
             setName('');
+            setCode('');
           }}
         >
           新建建筑

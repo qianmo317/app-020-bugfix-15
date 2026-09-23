@@ -13,11 +13,13 @@ const KIND_LABELS: Record<BuildingKind, string> = {
 
 export function BuildingPage({ buildingId }: { buildingId: string }) {
   const building = useStore((s) => s.buildings.find((b) => b.id === buildingId));
+  const buildings = useStore((s) => s.buildings);
   const floors = useStore((s) => s.floors);
   const [level, setLevel] = useState(1);
 
   if (!building) return <div className="page">建筑不存在。<Link to="/">返回首页</Link></div>;
   const bfs = building.floors.map((id) => floors[id]).filter(Boolean);
+  const codeDupWith = buildings.find((b) => b.id !== building.id && b.code && b.code === building.code);
 
   // 竖向疏散：把各层出口按 x 归一化位置画到同一张剖面上，直观看出共享楼梯
   const exitMarks = bfs.map((f) => {
@@ -40,6 +42,15 @@ export function BuildingPage({ buildingId }: { buildingId: string }) {
   return (
     <div className="page">
       <div className="toolbar">
+        <label className="row">楼栋编号
+          <input
+            value={building.code}
+            maxLength={8}
+            style={{ width: 90 }}
+            onChange={(e) => updateBuilding(building.id, { code: e.target.value.toUpperCase() })}
+            title="作为本楼设施编号前缀（如 A → A-3F-EX-01）；修改后本楼全部设施编号自动跟随"
+          />
+        </label>
         <input
           value={building.name}
           onChange={(e) => updateBuilding(building.id, { name: e.target.value })}
@@ -51,6 +62,9 @@ export function BuildingPage({ buildingId }: { buildingId: string }) {
           ))}
         </select>
         <span className="hint">建筑类别决定校验规则（在「规则」页调整）</span>
+        {codeDupWith && (
+          <span className="badge st-damaged">与「{codeDupWith.name}」楼栋编号重复，两楼设施编号会撞号</span>
+        )}
       </div>
 
       <h2>楼层</h2>

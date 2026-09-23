@@ -13,7 +13,7 @@ import type {
   ValidationResult,
 } from '../model';
 import { DEFAULT_RULES } from '../rules/defaults';
-import { nextCode, uid } from './id';
+import { nextCode, normalizeFacilityCodes, sanitizeBuildingCode, uid } from './id';
 import { polyAreaM2 } from '../lib/geometry';
 
 const STORAGE_KEY = 'fem.v1';
@@ -33,8 +33,11 @@ function loadState(): AppState {
       const s = JSON.parse(raw) as Partial<AppState>;
       // 缺失的节用默认值补齐（如旧版本数据没有 rules/marks），而不是整体丢弃用户数据
       if (s && Array.isArray(s.buildings) && s.floors) {
+        const buildings = s.buildings.map((b) => ({ ...b, code: sanitizeBuildingCode(b.code ?? '') }));
+        // 旧数据编号可能没有楼层/楼栋前缀，或因「数量+1」产生同层重号 → 加载时一次性归一化
+        normalizeFacilityCodes(s.floors, buildings);
         return {
-          buildings: s.buildings,
+          buildings,
           floors: s.floors,
           rules: { ...structuredClone(DEFAULT_RULES), ...(s.rules ?? {}) },
           marks: s.marks ?? {},
@@ -104,17 +107,33 @@ function updateFloor(floorId: string, mut: (f: Floor) => void) {
 
 // ---------- 建筑 ----------
 
-export function addBuilding(name: string, kind: BuildingKind): string {
+export function addBuilding(name: string, kind: BuildingKind, code = ''): string {
   const id = uid();
-  const b: Building = { id, name, kind, floors: [], createdAt: new Date().toISOString() };
+  const b: Building = { id, name, code: sanitizeBuildingCode(code), kind, floors: [], createdAt: new Date().toISOString() };
   setState((s) => s.buildings.push(b));
   return id;
 }
 
-export function updateBuilding(id: string, patch: Partial<Pick<Building, 'name' | 'kind'>>) {
+export function updateBuilding(id: string, patch: Partial<Pick<Building, 'name' | 'kind' | 'code'>>) {
   setState((s) => {
     const i = s.buildings.findIndex((x) => x.id === id);
-    if (i >= 0) s.buildings[i] = { ...s.buildings[i], ...patch };
+    if (i < 0) return;
+    const oldCode = s.buildings[i].code;
+    const next = { ...s.buildings[i], ...patch };
+    if (patch.code !== undefined) next.code = sanitizeBuildingCode(patch.code);
+    s.buildings[i] = next;
+    // 楼栋编号是设施编号的前缀段：编号一改，其全部楼层的设施编号必须整体跟随，
+    // 否则不同楼栋会继续共用 1F-EX-01 这类裸楼层编号，台账上无法区分。
+    if (patch.code !== undefined && next.code !== oldCode) {
+      normalizeFacilityCodes(s.floors, s.buildings);
+      for (const fid of next.floors) {
+        const f = s.floors[fid];
+        if (f) {
+          f.version++;
+          s.floors[fid] = { ...f };
+        }
+      }
+    }
   });
 }
 
@@ -205,7 +224,8 @@ export function moveRoom(floorId: string, roomId: string, dx: number, dy: number
 export function addFacility(floorId: string, kind: FacilityKind, x: number, y: number): string {
   const id = uid();
   updateFloor(floorId, (f) => {
-    const fac: Facility = { id, kind, x, y, code: nextCode(f, kind), checks: [] };
+    const buildingCode = state.buildings.find((b) => b.id === f.buildingId)?.code ?? '';
+    const fac: Facility = { id, kind, x, y, code: nextCode(f, kind, buildingCode), checks: [] };
     if (kind === 'extinguisher') fac.spec = { extType: 'dry_powder', weightKg: 4 };
     f.version++;
     f.facilities.push(fac);
@@ -321,6 +341,7 @@ export function loadDemo(): string {
     s.buildings.push({
       id: buildingId,
       name: '示例办公楼',
+      code: 'A',
       kind: 'office',
       floors: [floorId],
       createdAt: new Date().toISOString(),
@@ -340,15 +361,15 @@ export function loadDemo(): string {
     const mkF = (kind: FacilityKind, x: number, y: number, code: string, checks: Facility['checks'] = [], spec?: Facility['spec']) => {
       facilities.push({ id: uid(), kind, x: x * M, y: y * M, code, checks, spec });
     };
-    mkF('exit', 0.5, 1, '1F-EXIT-01');
-    mkF('exit', 40.5, 1, '1F-EXIT-02');
-    mkF('extinguisher', 20.5, 1, '1F-EX-01', [{ date: dateStr(20), status: 'ok' }], { extType: 'dry_powder', weightKg: 4 });
-    mkF('extinguisher', 4, 5, '1F-EX-02', [{ date: dateStr(45), status: 'ok' }], { extType: 'dry_powder', weightKg: 4 });
-    mkF('extinguisher', 36, 5, '1F-EX-03', [], { extType: 'co2', weightKg: 2 });
-    mkF('hydrant', 10, 1, '1F-HY-01', [{ date: dateStr(10), status: 'ok' }]);
-    mkF('exit_sign', 1, 1.7, '1F-ES-01', [{ date: dateStr(15), status: 'ok' }]);
-    mkF('exit_sign', 40, 1.7, '1F-ES-02', [{ date: dateStr(15), status: 'ok' }]);
-    mkF('emergency_light', 20.5, 0.4, '1F-EL-01', [{ date: dateStr(15), status: 'ok' }]);
+    mkF('exit', 0.5, 1, 'A-1F-EXIT-01');
+    mkF('exit', 40.5, 1, 'A-1F-EXIT-02');
+    mkF('extinguisher', 20.5, 1, 'A-1F-EX-01', [{ date: dateStr(20), status: 'ok' }], { extType: 'dry_powder', weightKg: 4 });
+    mkF('extinguisher', 4, 5, 'A-1F-EX-02', [{ date: dateStr(45), status: 'ok' }], { extType: 'dry_powder', weightKg: 4 });
+    mkF('extinguisher', 36, 5, 'A-1F-EX-03', [], { extType: 'co2', weightKg: 2 });
+    mkF('hydrant', 10, 1, 'A-1F-HY-01', [{ date: dateStr(10), status: 'ok' }]);
+    mkF('exit_sign', 1, 1.7, 'A-1F-ES-01', [{ date: dateStr(15), status: 'ok' }]);
+    mkF('exit_sign', 40, 1.7, 'A-1F-ES-02', [{ date: dateStr(15), status: 'ok' }]);
+    mkF('emergency_light', 20.5, 0.4, 'A-1F-EL-01', [{ date: dateStr(15), status: 'ok' }]);
     const exits = facilities.filter((f) => f.kind === 'exit').map((f) => f.id);
     s.floors[floorId] = {
       id: floorId,

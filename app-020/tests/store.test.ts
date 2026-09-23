@@ -155,6 +155,44 @@ describe('设施：编号、exits 同步、拖动、检查记录', () => {
   });
 });
 
+describe('设施编号：楼层唯一 + 楼栋前缀（台账撞号事故回归）', () => {
+  it('S11 同层删中间一台再加：编号取最大+1，图上两台绝不同号', () => {
+    const a = addFacility(fid, 'extinguisher', 1000, 1000);
+    const b = addFacility(fid, 'extinguisher', 2000, 1000);
+    const c = addFacility(fid, 'extinguisher', 3000, 1000);
+    const codeOf = (id: string) => snap().floors[fid].facilities.find((x) => x.id === id)!.code;
+    expect([codeOf(a), codeOf(b), codeOf(c)]).toEqual(['1F-EX-01', '1F-EX-02', '1F-EX-03']);
+    deleteFacility(fid, b); // 删掉中间的 02
+    const d = addFacility(fid, 'extinguisher', 4000, 1000);
+    expect(codeOf(d)).toBe('1F-EX-04'); // 不是 02；再放一台也不与 01/03 撞
+    const e = addFacility(fid, 'extinguisher', 5000, 1000);
+    expect(codeOf(e)).toBe('1F-EX-05');
+    const codes = snap().floors[fid].facilities.filter((x) => x.kind === 'extinguisher').map((x) => x.code);
+    expect(new Set(codes).size).toBe(codes.length);
+  });
+
+  it('S12 两栋楼各放一台灭火器：编号带各自楼栋前缀，不编到一块儿', () => {
+    updateBuilding(bid, { code: 'A' });
+    const bid2 = addBuilding('测试厂房2', 'office', 'B');
+    const fid2 = addFloor(bid2, 1);
+    const x1 = addFacility(fid, 'extinguisher', 1000, 1000);
+    const x2 = addFacility(fid2, 'extinguisher', 1000, 1000);
+    expect(snap().floors[fid].facilities.find((x) => x.id === x1)!.code).toBe('A-1F-EX-01');
+    expect(snap().floors[fid2].facilities.find((x) => x.id === x2)!.code).toBe('B-1F-EX-01');
+  });
+
+  it('S13 楼栋编号事后修改：本楼全部设施编号整体跟随到新前缀', () => {
+    updateBuilding(bid, { code: 'A' });
+    const x = addFacility(fid, 'extinguisher', 1000, 1000);
+    expect(snap().floors[fid].facilities.find((y) => y.id === x)!.code).toBe('A-1F-EX-01');
+    updateBuilding(bid, { code: 'C' });
+    expect(snap().floors[fid].facilities.find((y) => y.id === x)!.code).toBe('C-1F-EX-01');
+    // 清空楼栋编号 → 回退为裸楼层前缀
+    updateBuilding(bid, { code: '' });
+    expect(snap().floors[fid].facilities.find((y) => y.id === x)!.code).toBe('1F-EX-01');
+  });
+});
+
 describe('标记与校验结果', () => {
   it('S9 setMark 每次写入新对象（打印页「您在此」拖拽订阅）', () => {
     setMark(fid, { x: 1000, y: 2000 });

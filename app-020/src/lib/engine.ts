@@ -334,6 +334,22 @@ export function validateFloor(floor: Floor, rules: RuleSet, now: number = Date.n
     });
   }
 
+  // 设施编号：同楼层内编号必须唯一（编号自动生成本应保证，此处是脏数据/手工改库的兜底）
+  const seenCodes = new Set<string>();
+  for (const f of floor.facilities) {
+    if (seenCodes.has(f.code)) {
+      items.push({
+        severity: 'error',
+        type: 'FACILITY_CODE_DUPLICATE',
+        facilityId: f.id,
+        point: { x: f.x, y: f.y },
+        message: `设施编号 ${f.code} 在本楼层重复：两台设施共用同一编号，编号须按楼栋-楼层-类型在本层唯一`,
+      });
+    } else {
+      seenCodes.add(f.code);
+    }
+  }
+
   // 检查记录
   for (const f of floor.facilities) {
     const info = checkDueInfo(f, now);

@@ -108,4 +108,21 @@ describe('整改清单（validateFloor）', () => {
     expect(r.items[0].severity).toBe('error'); // error 排在最前
     expect(r.pass).toBe(false);
   });
+
+  it('L8 同层两台设施编号撞号 → FACILITY_CODE_DUPLICATE（error，带 facilityId 可定位）', () => {
+    const { floor, rules } = mkFloor([mkRoom('走道', 'corridor', rect(0, 0, 30, 2))], [
+      { kind: 'exit', x: 0.5, y: 1, checks: [{ date: dateStr(1), status: 'ok' }] },
+      { kind: 'extinguisher', x: 10, y: 1, checks: [{ date: dateStr(1), status: 'ok' }] },
+    ]);
+    // 模拟脏数据/旧版计数式编号造成的同号
+    const exts = floor.facilities.filter((f) => f.kind === 'extinguisher');
+    floor.facilities.push({ ...exts[0], id: 'dup-id', x: 20000, checks: [{ date: dateStr(1), status: 'ok' }] });
+    const r = validateFloor(floor, rules);
+    const dup = r.items.filter((i) => i.type === 'FACILITY_CODE_DUPLICATE');
+    expect(dup.length).toBe(1);
+    expect(dup[0].severity).toBe('error');
+    expect(dup[0].facilityId).toBe('dup-id');
+    expect(dup[0].point).toEqual({ x: 20000, y: 1000 });
+    expect(r.pass).toBe(false);
+  });
 });

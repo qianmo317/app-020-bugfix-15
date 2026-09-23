@@ -34,7 +34,7 @@ export type Facility = {
   kind: FacilityKind;
   x: number; // mm
   y: number; // mm
-  code: string; // 楼层-类型-序号，如 3F-EX-01
+  code: string; // 楼栋-楼层-类型-序号，如 A-3F-EX-01（楼栋未编号时省略楼栋段）
   spec?: {
     extType?: 'dry_powder' | 'co2' | 'water';
     weightKg?: number;
@@ -71,6 +71,8 @@ export type BuildingKind = 'office' | 'retail' | 'factory' | 'school';
 export type Building = {
   id: string;
   name: string;
+  /** 楼栋编号（设施编号前缀，如 A → A-3F-EX-01）；空串表示未编号，省略楼栋段 */
+  code: string;
   kind: BuildingKind;
   floors: string[];
   createdAt: string;
